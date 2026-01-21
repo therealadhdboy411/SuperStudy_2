@@ -125,6 +125,101 @@ Be strict with:
           };
         }
       }),
+
+    generateSummary: publicProcedure
+      .input(
+        z.object({
+          results: z.array(
+            z.object({
+              question: z.string(),
+              userAnswer: z.string(),
+              correctAnswer: z.string(),
+              isCorrect: z.boolean(),
+            })
+          ),
+          model: z.string().optional().default("mistral-medium"),
+        })
+      )
+      .mutation(async ({ input }) => {
+        const { results, model } = input;
+        const wrongAnswers = results.filter(r => !r.isCorrect);
+
+        if (wrongAnswers.length === 0) {
+          return {
+            summary: "Perfect score! You demonstrated excellent mastery of all terms in this section.",
+            improvementTips: "Keep challenging yourself with harder categories or faster completion times."
+          };
+        }
+
+        try {
+          const mistralApiKey = process.env.MistralAPIKey;
+          if (!mistralApiKey) {
+            throw new Error("Mistral API key not configured");
+          }
+
+          const prompt = `You are an anatomy tutor. A student just finished a practice quiz and missed the following questions:
+
+${wrongAnswers.map((r, i) => `${i + 1}. Question: "${r.question}"
+   Student Answer: "${r.userAnswer}"
+   Correct Answer: "${r.correctAnswer}"`).join("\n")}
+
+Your task:
+1. Analyze WHY the student might have made these mistakes (e.g., confused similar terms, spelling error, wrong location).
+2. Provide specific improvement tips for these concepts.
+
+Respond with a JSON object:
+{
+  "summary": "A 2-3 sentence analysis of their errors.",
+  "improvementTips": "2-3 specific bullet points on what to study to fix these particular errors."
+}`;
+
+          const modelMap: Record<string, string> = {
+            "ministral-3": "ministral-3",
+            "mistral-small": "mistral-small-latest",
+            "magistral-small": "mistral-small-latest",
+            "mistral-medium": "mistral-medium-latest",
+            "magistral-medium": "mistral-medium-latest",
+            "mistral-large": "mistral-large-latest",
+          };
+
+          const selectedModel = modelMap[model] || "mistral-medium-latest";
+
+          const response = await axios.post(
+            "https://api.mistral.ai/v1/chat/completions",
+            {
+              model: selectedModel,
+              messages: [
+                {
+                  role: "user",
+                  content: prompt,
+                },
+              ],
+              response_format: {
+                type: "json_object",
+              },
+            },
+            {
+              headers: {
+                Authorization: `Bearer ${mistralApiKey}`,
+                "Content-Type": "application/json",
+              },
+            }
+          );
+
+          const content = response.data.choices[0]?.message?.content;
+          if (!content) {
+            throw new Error("No response from Mistral API");
+          }
+
+          return JSON.parse(content);
+        } catch (error) {
+          console.error("Error generating summary:", error);
+          return {
+            summary: "Great effort! Review the correct answers above to improve.",
+            improvementTips: "Focus on the specific terms you missed."
+          };
+        }
+      }),
   }),
 });
 
